@@ -12,7 +12,6 @@ if platform.system() == 'Windows':
     asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
 
 # ==================== CONFIGURATION ====================
-
 REGION = 'br1'                       # Your server region
 ROUTING_VALUE = 'americas'           # Routing value for account API
 CHANNEL_ID = 1396168023509045289       # Discord channel ID where messages will be sent
@@ -47,8 +46,8 @@ async def on_message(message):
     except Exception as e:
         print(f"Error processing message: {e}")
 
-@bot.command(name='status')
-async def status(ctx, *, args):
+@bot.command(name='profile')
+async def profile(ctx, *, args):
     try:
         # Get account using Riot ID
         # print(args)
