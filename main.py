@@ -2,94 +2,25 @@
 import discord
 from discord.ext import commands, tasks
 import asyncio
+import platform
 from riotwatcher import LolWatcher, RiotWatcher, ApiError
 import json
 import os
 from datetime import datetime, timezone
 
-# ==================== CONFIGURATION ====================
-# These are your personal keys and settings - replace with real values
+if platform.system() == 'Windows':
+    asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
 
-RIOT_ID_NAME = 'Lightbeal3'           # Your Riot ID name (the part before #)
-RIOT_ID_TAG = 'BR1'                  # Your Riot ID tag (the part after #) - usually BR1 for Brazil
-REGION = 'br1'                       # Your server region (lowercase)
-ROUTING_VALUE = 'americas'           # Routing value for account API (americas for Brazil)
+# ==================== CONFIGURATION ====================
+
+REGION = 'br1'                       # Your server region
+ROUTING_VALUE = 'americas'           # Routing value for account API
 CHANNEL_ID = 1396168023509045289       # Discord channel ID where messages will be sent
 
 # ==================== INITIALIZE OBJECTS ====================
 bot = commands.Bot(command_prefix='!', intents=discord.Intents.all())
 lol_watcher = LolWatcher(RIOT_API_KEY)
 riot_watcher = RiotWatcher(RIOT_API_KEY)
-last_match_file = 'last_match.json'
-
-def load_last_match():
-    try:
-        with open(last_match_file, 'r') as f:
-            data = json.load(f)
-            return data.get('last_match_id')
-    except FileNotFoundError:
-        return None
-    except json.JSONDecodeError:
-        print("Warning: last_match.json is corrupted, starting fresh")
-        return None
-
-def save_last_match(match_id):
-    try:
-        with open(last_match_file, 'w') as f:
-            json.dump({'last_match_id': match_id}, f)
-        print(f"Saved last match ID: {match_id}")
-    except Exception as e:
-        print(f"Error saving last match ID: {e}")
-
-def format_match_result(match_data, summoner_puuid):
-    # Find our summoner's data among all 10 participants
-    participant = None
-    for p in match_data['info']['participants']:
-        if p['puuid'] == summoner_puuid:
-            participant = p
-            break
-    
-    if not participant:
-        return None
-    
-    # Extract match information
-    game_mode = match_data['info']['gameMode']          
-    game_duration = match_data['info']['gameDuration']  
-    win = participant['win']                            
-    champion = participant['championName']              
-    kills = participant['kills']
-    deaths = participant['deaths']
-    assists = participant['assists']
-
-    duration_minutes = game_duration // 60
-    duration_seconds = game_duration % 60
-
-    if win:
-        result_text = "🏆 **VICTORY**"
-        embed_color = 0x00ff00  # Green in hexadecimal
-    else:
-        result_text = "💀 **DEFEAT**"
-        embed_color = 0xff0000  # Red in hexadecimal
-
-    # Create Discord embed
-    embed = discord.Embed(
-        title=result_text,
-        color=embed_color,
-        timestamp=datetime.now()
-    )
-    
-    embed.add_field(name="Champion", value=champion, inline=True)
-    embed.add_field(name="KDA", value=f"{kills}/{deaths}/{assists}", inline=True)
-    embed.add_field(name="Game Mode", value=game_mode, inline=True)
-    embed.add_field(name="Duration", value=f"{duration_minutes}m {duration_seconds}s", inline=True)
-    
-    return embed
-
-@bot.event
-async def on_ready():
-    print(f'{bot.user} has logged in to Discord!')
-    if not check_matches.is_running():
-        check_matches.start()
 
 @bot.event
 async def on_message(message):
@@ -100,84 +31,84 @@ async def on_message(message):
     if message.author == bot.user:
         return
     
-    # This is crucial - process commands
-    await bot.process_commands(message)
-
-@tasks.loop(minutes=2)  
-async def check_matches():
+    # Debug: Check if we can access message content
     try:
-        print(f"Checking for new matches at {datetime.now()}")
-        
-        # Get account data using Riot ID (new method)
-        account = riot_watcher.account.by_riot_id(ROUTING_VALUE, RIOT_ID_NAME, RIOT_ID_TAG)
-        summoner_puuid = account['puuid']
-        summoner = lol_watcher.summoner.by_puuid(REGION, account['puuid'])
-        print(summoner)
-        # Get match list using PUUID
-        matches = lol_watcher.match.matchlist_by_puuid(ROUTING_VALUE, summoner_puuid, count=10)
-        print(matches)
+        content = getattr(message, 'content', None)
+        print(f"Message from {message.author}: '{content}'")
 
-        if not matches:
-            print("No matches found")
-            return
-
-        latest_match_id = matches[0]
-        last_match_id = load_last_match()
-
-        if latest_match_id != last_match_id:
-            print("New match detected!")
-            match_data = lol_watcher.match.by_id(ROUTING_VALUE, latest_match_id)
-            # print(f"Dados da partida: {match_data}")
-            if match_data['info']['gameEndTimestamp'] > 0:
-                # Match is finished, send notification
-                embed = format_match_result(match_data, summoner_puuid)
-                
-                if embed:
-                    channel = bot.get_channel(CHANNEL_ID)
-                    if channel:
-                        await channel.send(embed=embed)
-                        print("Match result sent to Discord!")
-                    else:
-                        print(f"Channel with ID {CHANNEL_ID} not found")
-                
-                # Save the new match ID
-                save_last_match(latest_match_id)
-            else:
-                print("Match is still ongoing")
+        # Only process messages that start with !
+        if content and content.startswith('!'):
+            print(f"Processing command: {content}")
+            # Process the command
+            await bot.process_commands(message)
         else:
-            print("No new matches")
-
-    except ApiError as err:
-        if err.response.status_code == 429:
-            print("Rate limit exceeded. Waiting...")
-            await asyncio.sleep(60)
-        elif err.response.status_code == 404:
-            print("Account/Summoner not found - check your Riot ID")
-        else:
-            print(f"API Error: {err}")
+            print("Message doesn't start with ! - ignoring")
+            
     except Exception as e:
-        print(f"Unexpected error: {e}")
+        print(f"Error processing message: {e}")
 
 @bot.command(name='status')
-async def status(ctx):
+async def status(ctx, *, args):
     try:
-        print("Li o comando!")
         # Get account using Riot ID
-        account = riot_watcher.account.by_riot_id(ROUTING_VALUE, RIOT_ID_NAME, RIOT_ID_TAG)
-        
+        # print(args)
+        message = args.split('#')
+        id_name = message[0]
+        id_tag = message[1]
+        account = riot_watcher.account.by_riot_id(ROUTING_VALUE, id_name, id_tag)
+        if not account:
+            embed = discord.Embed(title="Summoner not found!",color=0x00ff00)
+
         # Get summoner data using PUUID
         summoner = lol_watcher.summoner.by_puuid(REGION, account['puuid'])
+        print(f"Summoner: {lol_watcher.league}")
+
+        # Get ranked information
+        ranked_stats = lol_watcher.league.by_puuid(REGION, account['puuid'])
+        print(f"ranked stats: {ranked_stats}")
         
-        embed = discord.Embed(title="🤖 Bot Status", color=0x00ff00)
-        embed.add_field(name="Riot ID", value=f"{RIOT_ID_NAME}#{RIOT_ID_TAG}", inline=True)
-        embed.add_field(name="Region", value=REGION.upper(), inline=True)
+        # Find Solo/Duo rank 
+        solo_rank = None
+        for queue in ranked_stats:
+            if queue['queueType'] == 'RANKED_SOLO_5x5':
+                solo_rank = queue
+                break
+        
+        # Format rank information
+        if solo_rank:
+            tier = solo_rank['tier'].capitalize()
+            rank = solo_rank['rank']
+            lp = solo_rank['leaguePoints']
+            rank_text = f"{tier} {rank} ({lp} LP)"
+        else:
+            rank_text = "Unranked"
+
+        account_name = value=f"{account["gameName"]}#{account["tagLine"]}"
+        profile_icon_id = summoner["profileIconId"]
+        profile_icon_url = f"https://ddragon.leagueoflegends.com/cdn/14.24.1/img/profileicon/{profile_icon_id}.png"
+
+        embed = discord.Embed(color=0x00ff00)
+        # embed = discord.Embed(title=f"Level: {summoner['summonerLevel']}", color=0x00ff00)
+        embed.set_author(name=account_name, icon_url=profile_icon_url)
+        # embed.set_image(url=profile_icon_url)
         embed.add_field(name="Level", value=summoner['summonerLevel'], inline=True)
+        embed.add_field(name="Rank", value=rank_text, inline=True)
         await ctx.send(embed=embed)
     except Exception as e:
         await ctx.send(f"❌ Error: {e}")
 
+@bot.event
+async def on_disconnect():
+    print("Bot disconnected from Discord")
+
+@bot.event
+async def on_resumed():
+    print("Bot connection resumed")
+
 if __name__ == "__main__":
     try:
-        bot.run(DISCORD_TOKEN)
+        bot.run(DISCORD_TOKEN, reconnect=True)  # Add reconnect=True
     except discord.errors.LoginFailure:
         print("❌ Invalid Discord bot token")
+    except Exception as e:
+        print(f"Bot crashed: {e}")
